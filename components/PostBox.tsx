@@ -3,6 +3,11 @@ import { useSession } from 'next-auth/react'
 import React, { useState } from 'react'
 import Avatar from './Avatar'
 import { useForm } from 'react-hook-form'
+import { useMutation, useQuery } from '@apollo/client'
+import { ADD_POST, ADD_SUBREDDIT } from '../graphql/mutations'
+import { GET_SUBREDDIT_BY_TOPIC } from '../graphql/queries'
+import client from '../apollo-client'
+import toast from 'react-hot-toast'
 
 type FormData = {
   postTitle: string
@@ -13,6 +18,9 @@ type FormData = {
 
 export default function PostBox() {
   const { data: session } = useSession()
+  const [addPost] = useMutation(ADD_POST)
+  const [addSubreddit] = useMutation(ADD_SUBREDDIT)
+
   const {
     register,
     setValue,
@@ -24,6 +32,68 @@ export default function PostBox() {
 
   const onSubmit = handleSubmit(async (formData) => {
     console.log(formData)
+    const notification = toast.loading('Creating new post')
+
+    try {
+      const { data: getSubredditListByTopic } = await client.query({
+        query: GET_SUBREDDIT_BY_TOPIC,
+        variables: {
+          topic: formData.subreddit,
+        },
+      })
+
+      const subredditExists = false
+
+      if (!subredditExists) {
+        const {
+          data: { insertSubreddit: newSubreddit },
+        } = await addSubreddit({
+          variables: { topic: formData.subreddit },
+        })
+
+        const image = formData.postImage || ''
+
+        const {
+          data: { insertPost: newPost },
+        } = await addPost({
+          variables: {
+            body: formData.postBody,
+            image,
+            subreddit_id: newSubreddit.id,
+            title: formData.postTitle,
+            username: session?.user?.name,
+          },
+        })
+
+        console.log(newPost)
+      } else {
+        const image = formData.postImage || ''
+
+        const {
+          data: { insertPost: newPost },
+        } = await addPost({
+          variables: {
+            body: formData.postBody,
+            image,
+            subreddit_id: getSubredditListByTopic[0].id,
+            title: formData.postTitle,
+            username: session?.user?.name,
+          },
+        })
+
+        console.log(newPost)
+      }
+
+      setValue('postBody', '')
+      setValue('postImage', '')
+      setValue('postTitle', '')
+      setValue('subreddit', '')
+
+      toast.success('New post created', { id: notification })
+    } catch (error) {
+      console.error(error)
+      toast.error('Whoops! something went wrong', { id: notification })
+    }
   })
 
   return (
@@ -54,7 +124,7 @@ export default function PostBox() {
       </div>
 
       {!!watch('postTitle') && (
-        <div className="flex flex-col py-2">
+        <div className="flex flex-col py-2 px-2">
           <div className="flex items-center px-2">
             <p className="min-w-[90px]">Body:</p>
             <input
@@ -91,6 +161,9 @@ export default function PostBox() {
             <div className="space-y-2 p-2 text-red-500">
               {errors.postTitle?.type === 'required' && (
                 <p>A Post Title is Required</p>
+              )}
+              {errors.subreddit?.type === 'required' && (
+                <p>A Subreddit is required</p>
               )}
             </div>
           )}
